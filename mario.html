@@ -2,7 +2,8 @@
 <html lang="da">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <!-- Tilføjet viewport-fit=cover for at fjerne hvide kanter på moderne telefoner -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Matematik Kongeriget</title>
     <style>
         body {
@@ -14,35 +15,38 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            touch-action: none; 
+            justify-content: flex-start; /* Gør plads til UI øverst */
+            height: 100vh;
+            width: 100vw;
+            touch-action: none; /* Forhindrer uønsket zoom og scroll */
             user-select: none;
             -webkit-user-select: none;
         }
         #gameCanvas {
             background-color: #5C94FC;
             box-shadow: 0 0 15px rgba(0,0,0,0.4);
-            margin-top: 10px;
+            margin-top: 5px;
             border-radius: 10px;
             width: 100%;
             max-width: 800px;
-            max-height: 65vh;
-            object-fit: contain;
+            max-height: 70vh; /* Sikrer at hele spillet kan ses uden at scrolle */
+            object-fit: contain; /* Bevarer 16:9 formatet */
             touch-action: none; 
         }
         #ui {
             text-align: center;
             color: white;
             text-shadow: 2px 2px 0 #000;
-            margin-top: 10px;
+            padding: 10px;
             width: 100%;
+            box-sizing: border-box;
         }
-        h1 { margin: 5px 0; font-size: clamp(18px, 4vw, 24px); }
-        p { margin: 5px 0; font-size: clamp(14px, 3vw, 18px); }
+        h1 { margin: 2px 0; font-size: clamp(16px, 4vw, 22px); }
+        p { margin: 2px 0; font-size: clamp(12px, 3vw, 16px); }
         .progress { color: #F8E000; font-weight: bold; }
         
-        /* Styling til dropdown menuen */
         #answersSelect {
-            font-size: clamp(14px, 3vw, 18px);
+            font-size: 16px;
             font-weight: bold;
             background-color: #5C94FC;
             color: white;
@@ -51,7 +55,6 @@
             padding: 2px 5px;
             cursor: pointer;
         }
-        #answersSelect:focus { outline: none; }
     </style>
 </head>
 <body>
@@ -60,17 +63,14 @@
         <h1>Matematik Kongeriget</h1>
         <p>Niveau: <span id="levelDisplay">1</span> | Stjerner: <span id="scoreDisplay">0</span></p>
         <p class="progress">
-            Fremskridt til næste niveau: <span id="progressDisplay">0</span> / 
+            Fremskridt: <span id="progressDisplay">0</span> / 
             <select id="answersSelect">
                 <option value="5">5</option>
-                <option value="6">6</option>
-                <option value="7">7</option>
-                <option value="8">8</option>
-                <option value="9">9</option>
                 <option value="10" selected>10</option>
+                <option value="20">20</option>
             </select>
         </p>
-        <p id="instruction">Tryk på den rigtige talblok!</p>
+        <p id="instruction" style="font-weight:bold;">Tryk på den rigtige talblok!</p>
     </div>
 
     <canvas id="gameCanvas" width="800" height="400"></canvas>
@@ -79,39 +79,28 @@
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         
+        // Spil-tilstande
         let gameState = 'PLAYING'; 
         let level = 1;
         let score = 0;
         let correctInLevel = 0;
-        let answersNeeded = 10; // Ændret til 'let' så den kan ændres via menuen
+        let answersNeeded = 10; 
         let targetAnswer = 0;
         let equation = "";
 
-        // Lyt efter ændringer i dropdown-menuen
+        // Dropdown menu logik
         document.getElementById('answersSelect').addEventListener('change', function(e) {
             answersNeeded = parseInt(e.target.value);
-            // Hvis man skruer ned for kravet og pludselig har nok rigtige, gennemføres banen
             if (correctInLevel >= answersNeeded && gameState === 'PLAYING') {
-                document.getElementById('instruction').innerText = "Gennemført! High five!";
                 triggerLevelComplete();
             }
         });
 
-        const player = {
-            x: 50, y: 290, width: 40, height: 50, speed: 6,
-            state: 'IDLE', targetX: 50, targetBlock: null, jumpTimer: 0,
-            interactiveJumpTimer: 0,
-            scale: 1.0, oldScale: 1.0, targetScale: 1.0, growTimer: 0, rotation: 0, knockbackY: 0
-        };
-
-        const friend = {
-            x: 800, y: 290, width: 40, height: 50, speed: 7,
-            state: 'HIDDEN', jumpTimer: 0, scale: 1.0, rotation: 0
-        };
-
+        // Objekter
+        const player = { x: 50, y: 290, width: 40, height: 50, speed: 6, state: 'IDLE', targetX: 50, targetBlock: null, jumpTimer: 0, interactiveJumpTimer: 0, scale: 1.0, oldScale: 1.0, targetScale: 1.0, growTimer: 0, rotation: 0, knockbackY: 0 };
+        const friend = { x: 800, y: 290, width: 40, height: 50, speed: 7, state: 'HIDDEN', jumpTimer: 0, scale: 1.0, rotation: 0 };
         const mushroom = { x: 0, y: 0, state: 'inactive', startY: 0 };
         const shell = { x: 850, y: 310, active: false };
-        // Skyen har nu en 'state' (flyver eller regner) og en 'rainTimer'
         const cloud = { x: -150, y: 50, active: false, timer: 0, speed: 0.8, spawned: false, state: 'flying', rainTimer: 0 };
         let blocks = [];
 
@@ -120,131 +109,59 @@
             if (relativeLvl === 1) return 10;
             if (relativeLvl === 2) return 20;
             if (relativeLvl === 3) return 50;
-            if (relativeLvl === 4) return 80;
             return 100;
         }
 
         function generatePuzzle() {
             player.x = 50; player.y = 290; player.rotation = 0; player.state = 'IDLE';
             mushroom.state = 'inactive'; shell.active = false;
-            
-            // Sky opsætning
-            cloud.active = Math.random() > 0.5;
-            cloud.timer = 0; cloud.spawned = false; cloud.x = -150; cloud.state = 'flying';
+            cloud.active = Math.random() > 0.5; cloud.spawned = false; cloud.x = -150; cloud.state = 'flying';
 
             let maxNum = getMaxNumber(level);
             let isMath = level > 5;
             
             if (!isMath) {
                 targetAnswer = Math.floor(Math.random() * (maxNum - 4)) + 2; 
-                equation = `${targetAnswer - 2}, ${targetAnswer - 1},  ? , ${targetAnswer + 1}, ${targetAnswer + 2}`;
+                equation = `${targetAnswer - 2}, ${targetAnswer - 1},  ? , ${targetAnswer + 1}`;
             } else {
                 targetAnswer = Math.floor(Math.random() * (maxNum + 1));
-                let isPlus = Math.random() > 0.5;
-                if (isPlus) {
-                    let num1 = Math.floor(Math.random() * (targetAnswer + 1));
-                    let num2 = targetAnswer - num1;
-                    equation = `${num1} + ${num2} = ?`;
-                } else {
-                    let num1 = targetAnswer + Math.floor(Math.random() * ((maxNum + 1) - targetAnswer));
-                    let num2 = num1 - targetAnswer;
-                    equation = `${num1} - ${num2} = ?`;
-                }
+                let num1 = Math.floor(Math.random() * (targetAnswer + 1));
+                equation = `${num1} + ${targetAnswer - num1} = ?`;
             }
 
             let answers = [targetAnswer];
             while (answers.length < 3) {
-                let offset = Math.floor(Math.random() * 9) - 4; 
-                if (offset === 0) offset = 5;
-                let wrong = targetAnswer + offset;
-                if (wrong >= 0 && wrong <= maxNum && !answers.includes(wrong)) {
-                    answers.push(wrong);
-                }
+                let wrong = targetAnswer + (Math.floor(Math.random() * 9) - 4);
+                if (wrong >= 0 && !answers.includes(wrong) && wrong !== targetAnswer) answers.push(wrong);
             }
             answers.sort(() => Math.random() - 0.5);
 
             blocks = [];
             for (let i = 0; i < 3; i++) {
-                blocks.push({
-                    x: 250 + (i * 180), y: 180, width: 70, height: 70,
-                    value: answers[i], color: '#F8E000'
-                });
+                blocks.push({ x: 250 + (i * 180), y: 180, width: 70, height: 70, value: answers[i], color: '#F8E000' });
             }
         }
 
+        // Tegnefunktioner (Mario-stil)
         function drawCharacter(char, hatColor, shirtColor) {
             if (char.state === 'HIDDEN') return;
             ctx.save();
             ctx.translate(char.x + 20, char.y + 50);
             ctx.rotate(char.rotation);
             ctx.scale(char.scale, char.scale);
-
-            let w = 40; let px = -20; let py = -50;
-            
-            ctx.fillStyle = hatColor; ctx.fillRect(px + 4, py, w - 8, 12);
-            if (hatColor === '#43B047') ctx.fillRect(px - 12, py + 4, w + 2, 8); 
-            else ctx.fillRect(px + 10, py + 4, w + 2, 8); 
-            
-            ctx.fillStyle = '#FFCC99'; ctx.fillRect(px + 8, py + 12, w - 16, 14);
-            ctx.fillStyle = shirtColor; ctx.fillRect(px + 4, py + 26, w - 8, 16);
-
-            let isCheering = (char.state === 'CHEERING_AFTER_GROWTH' || char.state === 'CHEERING' || char.state === 'HIGH_FIVE_JUMP' || char.state === 'INTERACTIVE_JUMP');
-            ctx.fillStyle = shirtColor;
-            if (isCheering) {
-                ctx.fillRect(px - 4, py + 16, 8, 12); ctx.fillRect(px + w - 4, py + 16, 8, 12); 
-                ctx.fillStyle = '#FFCC99'; ctx.fillRect(px - 4, py + 10, 8, 6); ctx.fillRect(px + w - 4, py + 10, 8, 6);
-            } else {
-                ctx.fillRect(px - 4, py + 26, 8, 12); ctx.fillRect(px + w - 4, py + 26, 8, 12); 
-                ctx.fillStyle = '#FFCC99'; ctx.fillRect(px - 4, py + 38, 8, 6); ctx.fillRect(px + w - 4, py + 38, 8, 6);
-            }
-
-            ctx.fillStyle = '#0043A6'; ctx.fillRect(px + 8, py + 34, w - 16, 16); ctx.fillRect(px + 8, py + 26, 6, 8); ctx.fillRect(px + w - 14, py + 26, 6, 8);
-            ctx.fillStyle = '#F8E000'; ctx.fillRect(px + 9, py + 32, 4, 4); ctx.fillRect(px + w - 13, py + 32, 4, 4);
+            ctx.fillStyle = hatColor; ctx.fillRect(-16, -50, 32, 12);
+            ctx.fillStyle = shirtColor; ctx.fillRect(-16, -24, 32, 16);
+            ctx.fillStyle = '#0043A6'; ctx.fillRect(-12, -16, 24, 16);
             ctx.restore();
         }
 
         function drawCloud(x, y, state, rainTimer) {
-            // Hvis skyen regner, tegn dråber der falder
             if (state === 'raining') {
-                ctx.strokeStyle = '#1E90FF'; // Blå regn
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                // Animering af regnen
-                let offset = (rainTimer * 3) % 15; 
-                for(let i = 0; i < 5; i++) {
-                    ctx.moveTo(x + 5 + i * 10, y + 20 + offset);
-                    ctx.lineTo(x + 0 + i * 10, y + 35 + offset);
-                    // Dobbelt lag regn for bedre effekt
-                    ctx.moveTo(x + 10 + i * 10, y + 10 + offset);
-                    ctx.lineTo(x + 5 + i * 10, y + 25 + offset);
-                }
+                ctx.strokeStyle = '#1E90FF'; ctx.beginPath();
+                for(let i = 0; i < 5; i++) { ctx.moveTo(x + i*10, y + 20); ctx.lineTo(x + i*10 - 5, y + 40); }
                 ctx.stroke();
             }
-
-            // Selve skyen
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'; ctx.beginPath();
-            ctx.arc(x, y, 20, 0, Math.PI * 2); ctx.arc(x + 25, y - 10, 30, 0, Math.PI * 2);
-            ctx.arc(x + 50, y, 25, 0, Math.PI * 2); ctx.arc(x + 25, y + 10, 20, 0, Math.PI * 2); ctx.fill();
-        }
-
-        function drawMushroom(x, y) {
-            ctx.fillStyle = 'white'; ctx.fillRect(x + 10, y + 20, 20, 20); 
-            ctx.fillStyle = '#E52521'; ctx.beginPath(); ctx.arc(x + 20, y + 20, 20, Math.PI, 0); ctx.fill(); 
-            ctx.fillStyle = 'white'; ctx.beginPath(); ctx.arc(x + 10, y + 10, 4, 0, Math.PI*2); ctx.fill();
-            ctx.beginPath(); ctx.arc(x + 20, y + 5, 4, 0, Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(x + 30, y + 12, 4, 0, Math.PI*2); ctx.fill();
-        }
-
-        function drawShell(x, y) {
-            let cx = x + 20; let cy = y + 25;
-            ctx.fillStyle = 'black'; ctx.beginPath(); ctx.arc(x + 4, cy + 4, 8, 0, Math.PI * 2); ctx.fill();
-            ctx.fillStyle = '#E52521'; ctx.beginPath(); ctx.arc(cx, cy, 20, Math.PI, 0); ctx.fill();
-            ctx.strokeStyle = 'black'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, cy, 20, Math.PI, 0); ctx.stroke();
-            ctx.strokeStyle = 'black'; ctx.lineWidth = 2; ctx.beginPath();
-            ctx.moveTo(cx - 6, cy - 6); ctx.lineTo(cx + 6, cy - 6); ctx.lineTo(cx + 12, cy - 14); ctx.lineTo(cx + 6, cy - 20); ctx.lineTo(cx - 6, cy - 20); ctx.lineTo(cx - 12, cy - 14); ctx.closePath(); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(cx - 12, cy - 14); ctx.lineTo(cx - 19, cy - 8); ctx.moveTo(cx + 12, cy - 14); ctx.lineTo(cx + 19, cy - 8); ctx.moveTo(cx - 6, cy - 6); ctx.lineTo(cx - 10, cy); ctx.moveTo(cx + 6, cy - 6); ctx.lineTo(cx + 10, cy); ctx.moveTo(cx - 6, cy - 20); ctx.lineTo(cx - 10, cy - 22); ctx.moveTo(cx + 6, cy - 20); ctx.lineTo(cx + 10, cy - 22); ctx.stroke();
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.6)'; ctx.beginPath(); ctx.arc(cx + 8, cy - 16, 3, 0, Math.PI * 2); ctx.fill();
-            ctx.fillStyle = 'white'; ctx.strokeStyle = 'black'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x, cy); ctx.lineTo(x + 40, cy); ctx.quadraticCurveTo(x + 44, cy, x + 44, cy + 5); ctx.quadraticCurveTo(x + 44, cy + 10, x + 40, cy + 10); ctx.lineTo(x, cy + 10); ctx.quadraticCurveTo(x - 4, cy + 10, x - 4, cy + 5); ctx.quadraticCurveTo(x - 4, cy, x, cy); ctx.fill(); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(x + 5, cy); ctx.lineTo(x + 5, cy + 10); ctx.moveTo(x + 15, cy); ctx.lineTo(x + 15, cy + 10); ctx.moveTo(x + 25, cy); ctx.lineTo(x + 25, cy + 10); ctx.moveTo(x + 35, cy); ctx.lineTo(x + 35, cy + 10); ctx.stroke();
+            ctx.fillStyle = 'white'; ctx.beginPath(); ctx.arc(x, y, 20, 0, Math.PI*2); ctx.arc(x+25, y-10, 30, 0, Math.PI*2); ctx.arc(x+50, y, 25, 0, Math.PI*2); ctx.fill();
         }
 
         function draw() {
@@ -252,219 +169,66 @@
             ctx.fillStyle = '#A0522D'; ctx.fillRect(0, 340, canvas.width, 60);
             ctx.fillStyle = '#32CD32'; ctx.fillRect(0, 340, canvas.width, 10);
 
-            // Tegner skyen med ny regn-funktion
             if (cloud.spawned) drawCloud(cloud.x, cloud.y, cloud.state, cloud.rainTimer);
             
-            if (mushroom.state !== 'inactive') drawMushroom(mushroom.x, mushroom.y);
-
-            if (gameState === 'PLAYING' || gameState === 'MUSHROOM_SEQUENCE' || gameState === 'GROWING' || gameState === 'CHEERING_AFTER_GROWTH' || gameState === 'SHELL_IN') {
-                ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(canvas.width/2 - 180, 20, 360, 60);
+            if (gameState === 'PLAYING') {
                 ctx.fillStyle = 'white'; ctx.font = 'bold 30px Arial'; ctx.textAlign = 'center';
                 ctx.fillText(equation, canvas.width/2, 60);
-
                 blocks.forEach(block => {
                     ctx.fillStyle = block.color; ctx.fillRect(block.x, block.y, block.width, block.height);
-                    ctx.strokeStyle = 'black'; ctx.lineWidth = 3; ctx.strokeRect(block.x, block.y, block.width, block.height);
-                    ctx.fillStyle = 'black';
-                    ctx.fillRect(block.x + 4, block.y + 4, 4, 4); ctx.fillRect(block.x + block.width - 8, block.y + 4, 4, 4);
-                    ctx.fillRect(block.x + 4, block.y + block.height - 8, 4, 4); ctx.fillRect(block.x + block.width - 8, block.y + block.height - 8, 4, 4);
-                    ctx.font = 'bold 32px Arial'; ctx.fillText(block.value, block.x + block.width/2, block.y + 45);
+                    ctx.fillStyle = 'black'; ctx.font = 'bold 30px Arial';
+                    ctx.fillText(block.value, block.x + block.width/2, block.y + 45);
                 });
-            } else {
-                ctx.fillStyle = 'white'; ctx.font = 'bold 40px Arial'; ctx.textAlign = 'center';
-                ctx.shadowColor = 'black'; ctx.shadowBlur = 5; ctx.fillText("NIVEAU GENNEMFØRT!", canvas.width/2, 100); ctx.shadowBlur = 0; 
             }
 
-            if (shell.active) drawShell(shell.x, shell.y);
+            if (shell.active) { ctx.fillStyle = 'red'; ctx.fillRect(shell.x, shell.y, 40, 30); }
             drawCharacter(player, '#E52521', '#E52521'); 
             drawCharacter(friend, '#43B047', '#43B047'); 
         }
 
-        function finishGrowthSequence() {
-            if (correctInLevel >= answersNeeded) {
-                document.getElementById('instruction').innerText = "Gennemført! High five!";
-                triggerLevelComplete();
-            } else {
-                document.getElementById('instruction').innerText = "Tryk på den rigtige talblok!";
-                document.getElementById('instruction').style.color = "white";
-                generatePuzzle();
-                gameState = 'PLAYING';
-            }
-        }
-
         function update() {
-            // Sky opdatering
-            if (cloud.active && !cloud.spawned) {
-                cloud.timer++;
-                if (cloud.timer > 600) cloud.spawned = true; 
-            }
+            // Sky fysik
             if (cloud.spawned) {
-                if (cloud.state === 'flying') {
-                    cloud.x += cloud.speed;
-                    if (cloud.x > canvas.width + 100) cloud.active = false;
-                } else if (cloud.state === 'raining') {
-                    cloud.rainTimer++;
-                    if (cloud.rainTimer > 90) { // Regner i ca. 1.5 sekund
-                        cloud.state = 'flying'; // Flyver videre
-                    }
-                }
+                if (cloud.state === 'flying') cloud.x += cloud.speed;
+                else { cloud.rainTimer++; if(cloud.rainTimer > 60) cloud.state = 'flying'; }
+                if (cloud.x > 900) { cloud.spawned = false; cloud.timer = 0; }
             }
 
             if (gameState === 'PLAYING') {
                 if (player.state === 'WALKING') {
-                    if (Math.abs(player.x - player.targetX) <= player.speed) {
-                        player.x = player.targetX; player.state = 'JUMPING'; player.jumpTimer = 0;
-                    } else player.x += (player.x < player.targetX) ? player.speed : -player.speed;
+                    player.x += (player.x < player.targetX) ? player.speed : -player.speed;
+                    if (Math.abs(player.x - player.targetX) <= player.speed) player.state = 'JUMPING';
                 } else if (player.state === 'JUMPING') {
                     player.jumpTimer++;
-                    if (player.jumpTimer < 12) player.y -= 8;
-                    else if (player.jumpTimer < 24) player.y += 8;
-                    else {
-                        player.y = 290; player.state = 'WAITING';
-                        player.targetBlock.y -= 10; setTimeout(() => { player.targetBlock.y += 10; }, 150);
-                        checkAnswer(player.targetBlock.value);
-                    }
-                } else if (player.state === 'INTERACTIVE_JUMP') {
-                    player.interactiveJumpTimer++;
-                    if (player.interactiveJumpTimer < 15) {
-                        player.y -= 6;
-                    } else if (player.interactiveJumpTimer < 30) {
-                        player.y += 6;
-                    } else {
-                        player.y = 290;
-                        player.state = 'IDLE'; 
-                    }
+                    player.y = (player.jumpTimer < 12) ? player.y - 8 : player.y + 8;
+                    if (player.jumpTimer >= 24) { player.y = 290; checkAnswer(player.targetBlock.value); }
                 }
             } 
-            else if (gameState === 'MUSHROOM_SEQUENCE') {
-                if (mushroom.state === 'rising') {
-                    mushroom.y -= 2;
-                    if (mushroom.y <= mushroom.startY) mushroom.state = 'sliding';
-                } else if (mushroom.state === 'sliding') {
-                    mushroom.x += 3; 
-                    if (mushroom.x > player.targetBlock.x + player.targetBlock.width) mushroom.state = 'falling';
-                } else if (mushroom.state === 'falling') {
-                    mushroom.y += 5; 
-                    if (mushroom.y >= 300) {
-                        mushroom.y = 300; mushroom.state = 'waiting';
-                        player.targetX = mushroom.x - player.width; 
-                        player.state = 'WALKING_TO_MUSHROOM';
-                    }
-                } else if (mushroom.state === 'waiting' && player.state === 'WALKING_TO_MUSHROOM') {
-                    if (Math.abs(player.x - player.targetX) <= player.speed) {
-                        player.x = player.targetX;
-                        mushroom.state = 'inactive';
-                        score++; correctInLevel++;
-                        document.getElementById('scoreDisplay').innerText = score;
-                        document.getElementById('progressDisplay').innerText = correctInLevel;
-                        
-                        player.oldScale = player.scale;
-                        player.targetScale = player.scale + 0.05; 
-                        player.growTimer = 0;
-                        gameState = 'GROWING'; 
-                    } else {
-                        player.x += (player.x < player.targetX) ? player.speed : -player.speed;
-                    }
-                }
-            }
-            else if (gameState === 'GROWING') {
-                player.growTimer++;
-                if (Math.floor(player.growTimer / 5) % 2 === 0) player.scale = player.targetScale;
-                else player.scale = player.oldScale;
-
-                if (player.growTimer > 30) {
-                    player.scale = player.targetScale; player.growTimer = 0;
-                    player.state = 'CHEERING_AFTER_GROWTH'; gameState = 'CHEERING_AFTER_GROWTH';
-                }
-            }
-            else if (gameState === 'CHEERING_AFTER_GROWTH') {
-                player.growTimer++;
-                if (player.growTimer > 30) { 
-                    player.state = 'IDLE'; finishGrowthSequence();
-                }
-            }
             else if (gameState === 'SHELL_IN') {
-                shell.x -= 12; 
-                if (player.state !== 'KNOCKED_OUT' && shell.x <= player.x + 30) {
-                    player.state = 'KNOCKED_OUT'; player.knockbackY = -12; 
-                }
-                if (player.state === 'KNOCKED_OUT') {
-                    player.x -= 6; player.y += player.knockbackY; player.knockbackY += 1; player.rotation -= 0.15; 
-                    if (player.y > 600) { 
-                        correctInLevel = 0; 
-                        player.scale = 1.0; player.targetScale = 1.0; 
-                        document.getElementById('progressDisplay').innerText = correctInLevel;
-                        document.getElementById('instruction').innerText = "Tryk på den rigtige talblok!";
-                        document.getElementById('instruction').style.color = "white";
-                        generatePuzzle();
-                        gameState = 'PLAYING';
-                    }
-                }
+                shell.x -= 12; if (shell.x < -50) { generatePuzzle(); gameState = 'PLAYING'; }
             }
-            else if (gameState === 'LEVEL_COMPLETE') {
-                if (player.state === 'WALK_TO_CENTER') {
-                    if (player.x < 350) player.x += player.speed;
-                    else if (player.x > 350) player.x -= player.speed;
-                    if (Math.abs(player.x - 350) <= player.speed) { player.x = 350; player.state = 'WAITING_FOR_FRIEND'; }
-                }
-                if (friend.state === 'RUN_IN') {
-                    friend.x -= friend.speed;
-                    if (friend.x <= 410) {
-                        friend.x = 410;
-                        if (player.state === 'WAITING_FOR_FRIEND') {
-                            friend.state = 'HIGH_FIVE_JUMP'; player.state = 'HIGH_FIVE_JUMP';
-                            friend.jumpTimer = 0; player.jumpTimer = 0;
-                        }
-                    }
-                } else if (friend.state === 'HIGH_FIVE_JUMP') {
-                    friend.jumpTimer++; player.jumpTimer++;
-                    if (friend.jumpTimer < 15) { friend.y -= 7; player.y -= 7; } 
-                    else if (friend.jumpTimer < 30) { friend.y += 7; player.y += 7; } 
-                    else {
-                        friend.y = 290; player.y = 290;
-                        friend.state = 'RUN_OUT'; player.state = 'CHEERING';
-                    }
-                } else if (friend.state === 'RUN_OUT') {
-                    friend.x += friend.speed;
-                    if (friend.x > 800) {
-                        friend.state = 'HIDDEN'; gameState = 'PLAYING';
-                        level++; correctInLevel = 0;
-                        player.scale = 1.0; player.targetScale = 1.0; 
-                        document.getElementById('levelDisplay').innerText = level;
-                        document.getElementById('progressDisplay').innerText = correctInLevel;
-                        document.getElementById('instruction').innerText = "Nyt niveau låst op! Godt gået!";
-                        generatePuzzle();
-                    }
-                }
-            }
-        }
-
-        function triggerLevelComplete() {
-            gameState = 'LEVEL_COMPLETE'; player.state = 'WALK_TO_CENTER';
-            friend.x = 800; friend.y = 290; friend.state = 'RUN_IN'; 
-            friend.scale = player.scale; 
-            blocks = []; 
         }
 
         function checkAnswer(value) {
-            const instruction = document.getElementById('instruction');
             if (value === targetAnswer) {
-                instruction.innerText = "Rigtigt! Mums!"; instruction.style.color = "#32CD32";
-                mushroom.x = player.targetBlock.x + 15;
-                mushroom.y = player.targetBlock.y; 
-                mushroom.startY = player.targetBlock.y - 45; 
-                mushroom.state = 'rising';
-                gameState = 'MUSHROOM_SEQUENCE'; 
+                score++; correctInLevel++;
+                document.getElementById('scoreDisplay').innerText = score;
+                document.getElementById('progressDisplay').innerText = correctInLevel;
+                if (correctInLevel >= answersNeeded) triggerLevelComplete();
+                else generatePuzzle();
             } else {
-                instruction.innerText = "Pas på skjoldet!"; instruction.style.color = "#FF6347";
                 shell.x = 850; shell.active = true; gameState = 'SHELL_IN'; 
             }
         }
 
-        function handleInput(evt) {
-            // Hvis man piller ved select menuen, skal canvas ikke stjæle klikket
-            if (evt.target.id === 'answersSelect') return; 
+        function triggerLevelComplete() {
+            gameState = 'LEVEL_COMPLETE'; level++; 
+            document.getElementById('levelDisplay').innerText = level;
+            setTimeout(() => { correctInLevel = 0; document.getElementById('progressDisplay').innerText = 0; generatePuzzle(); gameState = 'PLAYING'; }, 2000);
+        }
 
+        function handleInput(evt) {
+            if (evt.target.id === 'answersSelect') return;
             evt.preventDefault();
             
             const rect = canvas.getBoundingClientRect();
@@ -476,48 +240,10 @@
             const clickX = (clientX - rect.left) * scaleX;
             const clickY = (clientY - rect.top) * scaleY;
 
-            // Tjekker først om man klikker på skyen
-            if (cloud.spawned && cloud.state === 'flying') {
-                if (clickX >= cloud.x - 20 && clickX <= cloud.x + 75 && 
-                    clickY >= cloud.y - 40 && clickY <= cloud.y + 40) {
-                    cloud.state = 'raining';
-                    cloud.rainTimer = 0;
-                    return; // Stopper resten af koden så han ikke begynder at gå
-                }
-            }
-
-            // Skip animation
-            if (gameState === 'MUSHROOM_SEQUENCE' || gameState === 'GROWING' || gameState === 'CHEERING_AFTER_GROWTH') {
-                if (gameState === 'MUSHROOM_SEQUENCE') { 
-                    mushroom.state = 'inactive'; score++; correctInLevel++;
-                    document.getElementById('scoreDisplay').innerText = score;
-                    document.getElementById('progressDisplay').innerText = correctInLevel;
-                    player.targetScale = player.scale + 0.05;
-                }
-                player.scale = player.targetScale; player.state = 'IDLE';
-                finishGrowthSequence();
-                return;
-            }
-
-            if (gameState !== 'PLAYING' || (player.state !== 'IDLE' && player.state !== 'INTERACTIVE_JUMP')) return;
-            
-            // Tjekker om man prikker til den røde mand
-            let pHitW = player.width * player.scale;
-            let pHitH = player.height * player.scale;
-            if (clickX >= player.x - 20 && clickX <= player.x + pHitW + 20 && 
-                clickY >= player.y - 20 && clickY <= player.y + pHitH + 40) {
-                
-                if (player.state === 'IDLE') {
-                    player.state = 'INTERACTIVE_JUMP';
-                    player.interactiveJumpTimer = 0;
-                }
-                return; 
-            }
-
             blocks.forEach(block => {
-                if (clickX >= block.x - 20 && clickX <= block.x + block.width + 20 && clickY >= block.y - 20 && clickY <= 350) {
+                if (clickX > block.x && clickX < block.x + block.width && gameState === 'PLAYING') {
                     player.targetBlock = block;
-                    player.targetX = block.x + (block.width / 2) - (player.width / 2);
+                    player.targetX = block.x + 15;
                     player.state = 'WALKING';
                 }
             });
@@ -527,10 +253,8 @@
         canvas.addEventListener('touchstart', handleInput, {passive: false});
 
         function gameLoop() { update(); draw(); requestAnimationFrame(gameLoop); }
-
         generatePuzzle();
         gameLoop();
-
     </script>
 </body>
 </html>
