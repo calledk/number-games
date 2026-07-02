@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Usercard Flow System</title>
+    <style>
+        :root {
+            --bg: #f4f4f9;
+            --text: #333;
+            --primary: #4361ee;
+            --card-bg: #fff;
+            --border: #ddd;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            max-width: 800px;
+            width: 100%;
+        }
+        nav {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        button {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button:hover { background-color: #3f37c9; }
+        button.secondary { background-color: #6c757d; }
+        .view { display: none; }
+        .view.active { display: block; }
+        
+        /* Card Styling */
+        .card {
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            border: 1px solid var(--border);
+        }
+        .flow-list { display: grid; gap: 10px; }
+        .flow-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+        }
+        
+        /* Runner Specific */
+        .options { margin: 20px 0; display: flex; flex-direction: column; gap: 10px; }
+        .options label {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .options label:hover { background: #f8f9fa; }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input[type="date"], input[type="text"], textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-family: monospace;
+        }
+        textarea { height: 300px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <nav>
+        <button onclick="navigateTo('dashboard')">Dashboard</button>
+        <button onclick="navigateTo('builder')">Flow Builder (JSON)</button>
+    </nav>
+
+    <div id="dashboard" class="view active">
+        <h2>Flow Templates</h2>
+        <div id="templatesList" class="flow-list"></div>
+
+        <h2 style="margin-top: 40px;">Active Processes</h2>
+        <div id="processesList" class="flow-list"></div>
+    </div>
+
+    <div id="runner" class="view">
+        <div class="card">
+            <h2 id="runnerProcessName"></h2>
+            <hr style="border: 0; border-top: 1px solid #ddd; margin: 15px 0;">
+            <h3 id="runnerCardTitle"></h3>
+            <p id="runnerCardQuestion"></p>
+
+            <div class="options" id="runnerOptions"></div>
+
+            <div class="form-group">
+                <label for="runnerRealDate">When did this actually happen?</label>
+                <input type="date" id="runnerRealDate" required>
+            </div>
+
+            <button onclick="submitStep()">Save & Next</button>
+            <button class="secondary" onclick="navigateTo('dashboard')">Save for Later</button>
+        </div>
+    </div>
+
+    <div id="builder" class="view">
+        <div class="card">
+            <h2>Edit Flow Templates</h2>
+            <p>For testing, you can define your flow structures via JSON here.</p>
+            <textarea id="jsonEditor"></textarea>
+            <br><br>
+            <button onclick="saveTemplates()">Save Templates</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // --- 1. DATA MANAGEMENT (localStorage) ---
+    const DB_FLOWS = 'my_flows';
+    const DB_PROCS = 'my_processes';
+
+    // Default template so the app works immediately on first load
+    const defaultFlows = [{
+        "id": "flow_onboarding",
+        "name": "Customer Onboarding",
+        "startCardId": "card_1",
+        "cards": [
+            {
+                "id": "card_1",
+                "title": "Initial Contact",
+                "question": "Did the customer answer the phone?",
+                "options": [
+                    { "label": "Yes - Proceed to pitch", "nextCardId": "card_2" },
+                    { "label": "No - Left Voicemail", "nextCardId": "card_end_vm" }
+                ]
+            },
+            {
+                "id": "card_2",
+                "title": "The Pitch",
+                "question": "How did they react to the product?",
+                "options": [
+                    { "label": "Interested - Send contract", "nextCardId": "card_end_win" },
+                    { "label": "Not Interested", "nextCardId": "card_end_loss" }
+                ]
+            }
+        ]
+    }];
+
+    // Initialize DB
+    if (!localStorage.getItem(DB_FLOWS)) {
+        localStorage.setItem(DB_FLOWS, JSON.stringify(defaultFlows));
+    }
+    if (!localStorage.getItem(DB_PROCS)) {
+        localStorage.setItem(DB_PROCS, JSON.stringify([]));
+    }
+
+    const getFlows = () => JSON.parse(localStorage.getItem(DB_FLOWS));
+    const getProcs = () => JSON.parse(localStorage.getItem(DB_PROCS));
+    const saveProcs = (procs) => localStorage.setItem(DB_PROCS, JSON.stringify(procs));
+
+    // Global state for runner
+    let currentProcId = null;
+
+    // --- 2. ROUTING ---
+    function navigateTo(viewId) {
+        document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+        document.getElementById(viewId).classList.add('active');
+
+        if (viewId === 'dashboard') renderDashboard();
+        if (viewId === 'builder') {
+            document.getElementById('jsonEditor').value = JSON.stringify(getFlows(), null, 4);
+        }
+    }
+
+    // --- 3. DASHBOARD LOGIC ---
+    function renderDashboard() {
+        const flows = getFlows();
+        const procs = getProcs();
+        
+        const tplList = document.getElementById('templatesList');
+        tplList.innerHTML = flows.map(f => `
+            <div class="flow-item">
+                <strong>${f.name}</strong>
+                <button onclick="startNewProcess('${f.id}')">Start Process</button>
+            </div>
+        `).join('');
+
+        const procList = document.getElementById('processesList');
+        if (procs.length === 0) {
+            procList.innerHTML = '<p>No active processes.</p>';
+        } else {
+            procList.innerHTML = procs.map(p => `
+                <div class="flow-item">
+                    <div>
+                        <strong>${p.processName}</strong><br>
+                        <small>Status: ${p.status} | Steps completed: ${p.history.length}</small>
+                    </div>
+                    ${p.status === 'in_progress' ? `<button onclick="resumeProcess('${p.id}')">Resume</button>` : '<button class="secondary" disabled>Completed</button>'}
+                </div>
+            `).join('');
+        }
+    }
+
+    function startNewProcess(flowId) {
+        const processName = prompt("Enter a name/identifier for this instance (e.g., John Doe):");
+        if (!processName) return;
+
+        const flow = getFlows().find(f => f.id === flowId);
+        const newProc = {
+            id: 'proc_' + Date.now(),
+            processName: processName,
+            flowId: flowId,
+            currentCardId: flow.startCardId,
+            status: 'in_progress',
+            history: []
+        };
+
+        const procs = getProcs();
+        procs.push(newProc);
+        saveProcs(procs);
+        
+        resumeProcess(newProc.id);
+    }
+
+    function resumeProcess(procId) {
+        currentProcId = procId;
+        navigateTo('runner');
+        renderRunner();
+    }
+
+    // --- 4. RUNNER LOGIC ---
+    function renderRunner() {
+        const proc = getProcs().find(p => p.id === currentProcId);
+        const flow = getFlows().find(f => f.id === proc.flowId);
+        const card = flow.cards.find(c => c.id === proc.currentCardId);
+
+        document.getElementById('runnerProcessName').innerText = `Running: ${proc.processName}`;
+        
+        // Check if flow hit an endpoint (card doesn't exist)
+        if (!card) {
+            document.getElementById('runnerCardTitle').innerText = "Process Complete";
+            document.getElementById('runnerCardQuestion').innerText = "You have reached the end of this flow.";
+            document.getElementById('runnerOptions').innerHTML = "";
+            proc.status = 'completed';
+            
+            // Save completion status
+            const allProcs = getProcs();
+            const index = allProcs.findIndex(p => p.id === currentProcId);
+            allProcs[index] = proc;
+            saveProcs(allProcs);
+            
+            document.getElementById('runnerRealDate').parentElement.style.display = 'none';
+            document.querySelector('#runner button').style.display = 'none';
+            return;
+        }
+
+        // Render Card
+        document.getElementById('runnerRealDate').parentElement.style.display = 'block';
+        document.querySelector('#runner button').style.display = 'inline-block';
+        
+        document.getElementById('runnerCardTitle').innerText = card.title;
+        document.getElementById('runnerCardQuestion').innerText = card.question;
+        
+        // Default date to today for convenience
+        document.getElementById('runnerRealDate').value = new Date().toISOString().split('T')[0];
+
+        const optionsDiv = document.getElementById('runnerOptions');
+        optionsDiv.innerHTML = card.options.map((opt, i) => `
+            <label>
+                <input type="radio" name="flowOption" value="${i}">
+                ${opt.label}
+            </label>
+        `).join('');
+    }
+
+    function submitStep() {
+        const selectedRadio = document.querySelector('input[name="flowOption"]:checked');
+        const realDate = document.getElementById('runnerRealDate').value;
+
+        if (!selectedRadio) {
+            alert("Please select an option.");
+            return;
+        }
+        if (!realDate) {
+            alert("Please enter the date this occurred.");
+            return;
+        }
+
+        const proc = getProcs().find(p => p.id === currentProcId);
+        const flow = getFlows().find(f => f.id === proc.flowId);
+        const card = flow.cards.find(c => c.id === proc.currentCardId);
+        const selectedOption = card.options[selectedRadio.value];
+
+        // 1. Save to history
+        proc.history.push({
+            cardId: card.id,
+            question: card.question,
+            selectedOptionLabel: selectedOption.label,
+            realLifeDate: realDate, // The user's input date
+            systemTimestamp: new Date().toISOString() // True audit timestamp
+        });
+
+        // 2. Advance pointer
+        proc.currentCardId = selectedOption.nextCardId;
+
+        // 3. Save to DB
+        const allProcs = getProcs();
+        const index = allProcs.findIndex(p => p.id === currentProcId);
+        allProcs[index] = proc;
+        saveProcs(allProcs);
+
+        // 4. Re-render
+        renderRunner();
+    }
+
+    // --- 5. BUILDER LOGIC (JSON Editor) ---
+    function saveTemplates() {
+        try {
+            const rawJson = document.getElementById('jsonEditor').value;
+            const parsed = JSON.parse(rawJson);
+            localStorage.setItem(DB_FLOWS, JSON.stringify(parsed));
+            alert("Templates saved successfully!");
+        } catch (e) {
+            alert("Invalid JSON format. Please check for errors.\n" + e.message);
+        }
+    }
+
+    // Init App
+    renderDashboard();
+
+</script>
+</body>
+</html>
