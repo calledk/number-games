@@ -3,11 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Usercard Flow System - Visible Merges</title>
+    <title>Usercard Flow System - Visual Map</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@9.4.3/dist/mermaid.min.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, securityLevel: 'loose', theme: 'default' });
+    </script>
+
     <style>
         :root {
             --bg: #f4f4f9; --text: #333; --primary: #4361ee; 
-            --card-bg: #fff; --border: #ccc; --danger: #ef233c; --success: #2a9d8f;
+            --card-bg: #fff; --border: #ccc; --danger: #ef233c; --success: #2a9d8f; --info: #4cc9f0;
         }
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -24,6 +30,7 @@
         button.secondary { background-color: #6c757d; }
         button.danger { background-color: var(--danger); }
         button.success { background-color: var(--success); }
+        button.info { background-color: var(--info); color: #000; font-weight: bold;}
         button.small { padding: 5px 10px; font-size: 12px; }
         
         .view { display: none; }
@@ -39,6 +46,7 @@
             display: flex; justify-content: space-between; align-items: center;
             padding: 15px; background: white; border: 1px solid var(--border); border-radius: 6px;
         }
+        .action-group { display: flex; gap: 5px; }
         
         /* Subflow Dashboard Items */
         .subflow-item {
@@ -46,12 +54,8 @@
             display: flex; justify-content: space-between; align-items: center;
             border-left: 4px solid var(--primary);
         }
-        .subflow-item.merged {
-            border-left-color: #adb5bd; background: #f1f3f5; opacity: 0.8;
-        }
-        .subflow-item.completed {
-            border-left-color: var(--success);
-        }
+        .subflow-item.merged { border-left-color: #adb5bd; background: #f1f3f5; opacity: 0.8; }
+        .subflow-item.completed { border-left-color: var(--success); }
         
         /* Form Inputs */
         .form-group { margin-bottom: 15px; }
@@ -81,6 +85,22 @@
         .merge-alert {
             background: #fff3cd; border-left: 5px solid #ffc107; padding: 20px; border-radius: 4px; margin-bottom: 20px;
         }
+
+        /* Map Viewer */
+        #mermaidCanvas {
+            width: 100%;
+            overflow-x: auto;
+            background: #fafafa;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 20px;
+            box-sizing: border-box;
+            text-align: center;
+        }
+        .legend {
+            display: flex; gap: 20px; justify-content: center; margin-bottom: 20px; font-size: 14px;
+        }
+        .legend span { display: flex; align-items: center; gap: 5px; }
     </style>
 </head>
 <body>
@@ -99,6 +119,19 @@
 
         <h2 style="margin-top: 40px;">Active Processes</h2>
         <div id="processesList" class="flow-list"></div>
+    </div>
+
+    <div id="mapView" class="view">
+        <div class="card">
+            <h2 id="mapViewTitle">Flow Map</h2>
+            <div class="legend">
+                <span><b>➔</b> Single Select Path</span>
+                <span><b>⇢</b> Multiple Select Path</span>
+            </div>
+            <div id="mermaidCanvas"></div>
+            <hr style="margin: 20px 0; border:0; border-top: 1px solid #ddd;">
+            <button class="secondary" onclick="navigateTo('dashboard')">Back to Dashboard</button>
+        </div>
     </div>
 
     <div id="runner" class="view">
@@ -145,6 +178,7 @@
 
 <script>
     // --- 1. DATA MANAGEMENT ---
+    // Retaining v4 data so you don't lose your work!
     const DB_VERSION = 'v4_visible_merges'; 
     if(!localStorage.getItem(DB_VERSION)) {
         localStorage.clear();
@@ -162,11 +196,11 @@
             {
                 "id": "card_1",
                 "title": "Initial Issue",
-                "question": "What issues is the user experiencing? (Select all that apply)",
+                "question": "What issues is the user experiencing?",
                 "selectionType": "multiple",
                 "options": [
-                    { "label": "Hardware broken", "nextCardId": "card_hw", "mergeText": "The hardware department is already handling a parallel ticket for this." },
-                    { "label": "Account locked", "nextCardId": "card_sw", "mergeText": "An account unlock ticket is already active." }
+                    { "label": "Hardware broken", "nextCardId": "card_hw", "mergeText": "" },
+                    { "label": "Account locked", "nextCardId": "card_sw", "mergeText": "" }
                 ]
             },
             {
@@ -175,8 +209,8 @@
                 "question": "Has a replacement been authorized?",
                 "selectionType": "single",
                 "options": [
-                    { "label": "Yes", "nextCardId": "card_billing", "mergeText": "Redirecting to active billing ticket..." },
-                    { "label": "No, refund requested", "nextCardId": "card_billing", "mergeText": "Redirecting to active billing ticket..." }
+                    { "label": "Yes", "nextCardId": "card_billing", "mergeText": "" },
+                    { "label": "No, refund requested", "nextCardId": "card_billing", "mergeText": "" }
                 ]
             },
             {
@@ -219,6 +253,7 @@
         document.getElementById(viewId).classList.add('active');
 
         if (viewId === 'dashboard') renderDashboard();
+        if (viewId === 'mapView') renderMap(param);
         if (viewId === 'builder') {
             if (param === 'new') {
                 draftFlow = { id: 'flow_' + Date.now(), name: "New Template", startCardId: "end_flow", cards: [] };
@@ -238,6 +273,7 @@
             <div class="flow-item">
                 <strong>${f.name}</strong>
                 <div class="action-group">
+                    <button class="info" onclick="navigateTo('mapView', '${f.id}')">🗺️ View Map</button>
                     <button class="secondary" onclick="navigateTo('builder', '${f.id}')">Edit</button>
                     <button onclick="startNewProcess('${f.id}')">Start Process</button>
                 </div>
@@ -250,46 +286,73 @@
         } else {
             procList.innerHTML = procs.map(p => {
                 const activeCount = p.subFlows.filter(sf => sf.status === 'in_progress').length;
-                
-                // Map ALL subflows (active, merged, completed)
                 let branchesHtml = p.subFlows.map(sf => {
                     if (sf.status === 'in_progress') {
-                        return `
-                        <div class="subflow-item">
-                            <span>🔀 Branch: <strong>${sf.name}</strong></span>
-                            <button class="small" onclick="resumeProcess('${p.id}', '${sf.id}')">Play Path</button>
-                        </div>`;
+                        return `<div class="subflow-item"><span>🔀 Branch: <strong>${sf.name}</strong></span><button class="small" onclick="resumeProcess('${p.id}', '${sf.id}')">Play Path</button></div>`;
                     } else if (sf.status === 'merged') {
-                        // Find the name of the branch it merged into
                         const targetBranch = p.subFlows.find(t => t.id === sf.mergeTargetId);
                         const targetName = targetBranch ? targetBranch.name : 'another branch';
-                        return `
-                        <div class="subflow-item merged">
-                            <span>🔀 Branch: <strong>${sf.name}</strong></span>
-                            <span style="font-size: 12px; font-weight: bold; color: #6c757d;">🔗 Closed (Merged into ${targetName})</span>
-                        </div>`;
+                        return `<div class="subflow-item merged"><span>🔀 Branch: <strong>${sf.name}</strong></span><span style="font-size: 12px; font-weight: bold; color: #6c757d;">🔗 Closed (Merged into ${targetName})</span></div>`;
                     } else if (sf.status === 'completed') {
-                        return `
-                        <div class="subflow-item completed">
-                            <span>🔀 Branch: <strong>${sf.name}</strong></span>
-                            <span style="font-size: 12px; font-weight: bold; color: var(--success);">✅ Reached End</span>
-                        </div>`;
+                        return `<div class="subflow-item completed"><span>🔀 Branch: <strong>${sf.name}</strong></span><span style="font-size: 12px; font-weight: bold; color: var(--success);">✅ Reached End</span></div>`;
                     }
                 }).join('');
 
-                return `
-                <div class="card" style="margin-bottom:10px;">
-                    <div style="display:flex; justify-content: space-between; border-bottom: 1px solid #ddd; padding-bottom: 10px;">
-                        <strong>${p.processName}</strong>
-                        <small>Active paths: ${activeCount} / Total generated: ${p.subFlows.length}</small>
-                    </div>
-                    <div>${branchesHtml}</div>
-                </div>
-                `;
+                return `<div class="card" style="margin-bottom:10px;"><div style="display:flex; justify-content: space-between; border-bottom: 1px solid #ddd; padding-bottom: 10px;"><strong>${p.processName}</strong><small>Active paths: ${activeCount} / Total generated: ${p.subFlows.length}</small></div><div>${branchesHtml}</div></div>`;
             }).join('');
         }
     }
 
+    // --- 4. MAP VIEWER LOGIC (MERMAID) ---
+    function renderMap(flowId) {
+        const flow = getFlows().find(f => f.id === flowId);
+        document.getElementById('mapViewTitle').innerText = `Flow Map: ${flow.name}`;
+        
+        let graphDef = 'graph TD\n';
+        
+        // Custom Styles
+        graphDef += `classDef default fill:#fff,stroke:#ccc,stroke-width:1px,color:#333;\n`;
+        graphDef += `classDef endpoints fill:#e9ecef,stroke:#adb5bd,stroke-width:2px,color:#495057;\n`;
+
+        // Start / End Nodes
+        graphDef += `Start(((Start)))\n`;
+        graphDef += `end_flow(((End)))\n`;
+        graphDef += `class Start,end_flow endpoints;\n`;
+
+        // Link start to first card
+        const startCard = flow.cards.length > 0 ? flow.startCardId : "end_flow";
+        graphDef += `Start --> ${startCard}\n`;
+
+        // Render Cards
+        flow.cards.forEach(card => {
+            // Strip out quotes to prevent Mermaid syntax errors, and format Headline + Question
+            const safeTitle = card.title.replace(/"/g, "'").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            const safeQuestion = card.question.replace(/"/g, "'").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            
+            // HTML styling within the node label
+            graphDef += `${card.id}["<b>${safeTitle}</b><br/><br/><i>${safeQuestion}</i>"]\n`;
+
+            // Render Connections
+            card.options.forEach(opt => {
+                const safeOptLabel = opt.label.replace(/"/g, "'");
+                
+                // MULTIPLE SELECT = Dotted line (-.->) | SINGLE SELECT = Solid line (-->)
+                const linkStyle = card.selectionType === 'multiple' ? '-.->' : '-->';
+                
+                graphDef += `${card.id} ${linkStyle}|"${safeOptLabel}"| ${opt.nextCardId}\n`;
+            });
+        });
+
+        const canvas = document.getElementById('mermaidCanvas');
+        canvas.innerHTML = `<div class="mermaid">${graphDef}</div>`;
+        
+        // Force mermaid to re-parse and draw
+        canvas.removeAttribute('data-processed');
+        mermaid.init(undefined, canvas.querySelectorAll('.mermaid'));
+    }
+
+
+    // --- 5. RUNNER LOGIC ---
     function startNewProcess(flowId) {
         const processName = prompt("Enter a name for this new instance:");
         if (!processName) return;
@@ -298,37 +361,19 @@
         const startCard = flow.cards.length > 0 ? flow.startCardId : "end_flow";
 
         const newProc = {
-            id: 'proc_' + Date.now(),
-            processName: processName,
-            flowId: flowId,
-            subFlowCount: 1, 
-            subFlows: [
-                {
-                    id: 'sf_' + Date.now(),
-                    name: 'Main Path',
-                    currentCardId: startCard,
-                    status: 'in_progress',
-                    mergeTargetId: null,
-                    mergeMessage: null,
-                    history: []
-                }
-            ]
+            id: 'proc_' + Date.now(), processName: processName, flowId: flowId, subFlowCount: 1, 
+            subFlows: [{ id: 'sf_' + Date.now(), name: 'Main Path', currentCardId: startCard, status: 'in_progress', mergeTargetId: null, mergeMessage: null, history: [] }]
         };
 
-        const procs = getProcs();
-        procs.push(newProc);
-        saveProcs(procs);
+        const procs = getProcs(); procs.push(newProc); saveProcs(procs);
         resumeProcess(newProc.id, newProc.subFlows[0].id);
     }
 
     function resumeProcess(procId, subFlowId) {
-        currentProcId = procId;
-        currentSubFlowId = subFlowId;
-        navigateTo('runner');
-        renderRunner();
+        currentProcId = procId; currentSubFlowId = subFlowId;
+        navigateTo('runner'); renderRunner();
     }
 
-    // --- 4. RUNNER LOGIC ---
     function renderRunner() {
         const proc = getProcs().find(p => p.id === currentProcId);
         const flow = getFlows().find(f => f.id === proc.flowId);
@@ -339,20 +384,16 @@
         const normalScreen = document.getElementById('runnerNormalScreen');
         const mergeScreen = document.getElementById('runnerMergeScreen');
 
-        // 1. Check if this sub-flow is waiting to merge
         if (subFlow.currentCardId === "MERGE_PENDING") {
-            normalScreen.style.display = 'none';
-            mergeScreen.style.display = 'block';
+            normalScreen.style.display = 'none'; mergeScreen.style.display = 'block';
             document.getElementById('runnerMergeText').innerText = subFlow.mergeMessage || "This branch is merging into an existing active branch.";
             return;
         }
 
-        mergeScreen.style.display = 'none';
-        normalScreen.style.display = 'block';
+        mergeScreen.style.display = 'none'; normalScreen.style.display = 'block';
 
         const card = flow.cards.find(c => c.id === subFlow.currentCardId);
 
-        // 2. Handle End of Flow
         if (!card || subFlow.currentCardId === "end_flow") {
             document.getElementById('runnerCardTitle').innerText = "Sub-flow Complete \u2705";
             document.getElementById('runnerCardQuestion').innerText = "This specific branch has reached the end.";
@@ -361,26 +402,18 @@
             document.getElementById('runnerSubmitBtn').style.display = 'none';
             
             subFlow.status = 'completed';
-            const allProcs = getProcs();
-            allProcs[allProcs.findIndex(p => p.id === currentProcId)] = proc;
-            saveProcs(allProcs);
-            return;
+            const allProcs = getProcs(); allProcs[allProcs.findIndex(p => p.id === currentProcId)] = proc; saveProcs(allProcs); return;
         }
 
-        // 3. Render Active Card
         document.getElementById('dateInputGroup').style.display = 'block';
         document.getElementById('runnerSubmitBtn').style.display = 'inline-block';
         document.getElementById('runnerCardTitle').innerText = card.title;
         document.getElementById('runnerCardQuestion').innerText = card.question;
         document.getElementById('runnerRealDate').value = new Date().toISOString().split('T')[0];
 
-        // RENDER DYNAMIC INPUTS (Radio vs Checkbox)
         const inputType = card.selectionType === 'multiple' ? 'checkbox' : 'radio';
         document.getElementById('runnerOptions').innerHTML = card.options.map((opt, i) => `
-            <label>
-                <input type="${inputType}" name="flowOption" value="${i}">
-                ${opt.label}
-            </label>
+            <label><input type="${inputType}" name="flowOption" value="${i}"> ${opt.label}</label>
         `).join('');
     }
 
@@ -398,57 +431,28 @@
 
         const selectedOptions = inputs.map(el => card.options[el.value]);
 
-        // Save history to current sub-flow
-        subFlow.history.push({
-            cardId: card.id,
-            question: card.question,
-            selectedOptions: selectedOptions.map(o => o.label).join(', '),
-            realLifeDate: realDate
-        });
+        subFlow.history.push({ cardId: card.id, question: card.question, selectedOptions: selectedOptions.map(o => o.label).join(', '), realLifeDate: realDate });
 
-        // The first selected option advances the CURRENT sub-flow.
         handleBranchTransition(proc, subFlow, selectedOptions[0]);
 
-        // Any additional options SPAWN NEW sub-flows. (Only happens if selectionType is 'multiple')
         for (let i = 1; i < selectedOptions.length; i++) {
             proc.subFlowCount += 1;
-            const newSubFlow = {
-                id: 'sf_' + Date.now() + '_' + i,
-                name: 'Path ' + proc.subFlowCount,
-                status: 'in_progress',
-                mergeTargetId: null,
-                mergeMessage: null,
-                history: []
-            };
+            const newSubFlow = { id: 'sf_' + Date.now() + '_' + i, name: 'Path ' + proc.subFlowCount, status: 'in_progress', mergeTargetId: null, mergeMessage: null, history: [] };
             proc.subFlows.push(newSubFlow);
             handleBranchTransition(proc, newSubFlow, selectedOptions[i]);
         }
 
-        const allProcs = getProcs();
-        allProcs[allProcs.findIndex(p => p.id === currentProcId)] = proc;
-        saveProcs(allProcs);
-        
-        renderRunner();
+        const allProcs = getProcs(); allProcs[allProcs.findIndex(p => p.id === currentProcId)] = proc; saveProcs(allProcs); renderRunner();
     }
 
     function handleBranchTransition(proc, branch, selectedOption) {
         const nextCardId = selectedOption.nextCardId;
+        if(nextCardId === 'end_flow') { branch.currentCardId = nextCardId; return; }
 
-        if(nextCardId === 'end_flow') {
-            branch.currentCardId = nextCardId;
-            return;
-        }
-
-        // Check for Collision
-        const collisionTarget = proc.subFlows.find(sf => 
-            sf.id !== branch.id && 
-            sf.status === 'in_progress' && 
-            sf.currentCardId === nextCardId
-        );
+        const collisionTarget = proc.subFlows.find(sf => sf.id !== branch.id && sf.status === 'in_progress' && sf.currentCardId === nextCardId);
 
         if (collisionTarget) {
-            branch.currentCardId = 'MERGE_PENDING';
-            branch.mergeTargetId = collisionTarget.id;
+            branch.currentCardId = 'MERGE_PENDING'; branch.mergeTargetId = collisionTarget.id;
             branch.mergeMessage = selectedOption.mergeText || "This path merges with an existing active branch.";
         } else {
             branch.currentCardId = nextCardId;
@@ -458,19 +462,13 @@
     function executeMerge() {
         const proc = getProcs().find(p => p.id === currentProcId);
         const subFlow = proc.subFlows.find(sf => sf.id === currentSubFlowId);
-
         subFlow.status = 'merged';
         
-        // Return to dashboard automatically after acknowledging a merge 
-        // (rather than forcing them into the target flow immediately, which can be disorienting)
-        const allProcs = getProcs();
-        allProcs[allProcs.findIndex(p => p.id === currentProcId)] = proc;
-        saveProcs(allProcs);
-
+        const allProcs = getProcs(); allProcs[allProcs.findIndex(p => p.id === currentProcId)] = proc; saveProcs(allProcs);
         navigateTo('dashboard');
     }
 
-    // --- 5. VISUAL BUILDER LOGIC ---
+    // --- 6. VISUAL BUILDER LOGIC ---
     function syncDOMToDraft() {
         if (!draftFlow) return;
         draftFlow.name = document.getElementById('b_flowName').value;
@@ -478,22 +476,11 @@
         if (startCardSelect) draftFlow.startCardId = startCardSelect.value;
         
         draftFlow.cards.forEach((card) => {
-            const titleEl = document.getElementById(`b_title_${card.id}`);
-            const qEl = document.getElementById(`b_question_${card.id}`);
-            const selEl = document.getElementById(`b_selType_${card.id}`);
-            
-            if (titleEl) card.title = titleEl.value;
-            if (qEl) card.question = qEl.value;
-            if (selEl) card.selectionType = selEl.value;
-            
+            const titleEl = document.getElementById(`b_title_${card.id}`); const qEl = document.getElementById(`b_question_${card.id}`); const selEl = document.getElementById(`b_selType_${card.id}`);
+            if (titleEl) card.title = titleEl.value; if (qEl) card.question = qEl.value; if (selEl) card.selectionType = selEl.value;
             card.options.forEach((opt, oIndex) => {
-                const optLbl = document.getElementById(`b_opt_label_${card.id}_${oIndex}`);
-                const optNext = document.getElementById(`b_opt_next_${card.id}_${oIndex}`);
-                const optMerge = document.getElementById(`b_opt_merge_${card.id}_${oIndex}`);
-                
-                if (optLbl) opt.label = optLbl.value;
-                if (optNext) opt.nextCardId = optNext.value;
-                if (optMerge) opt.mergeText = optMerge.value;
+                const optLbl = document.getElementById(`b_opt_label_${card.id}_${oIndex}`); const optNext = document.getElementById(`b_opt_next_${card.id}_${oIndex}`); const optMerge = document.getElementById(`b_opt_merge_${card.id}_${oIndex}`);
+                if (optLbl) opt.label = optLbl.value; if (optNext) opt.nextCardId = optNext.value; if (optMerge) opt.mergeText = optMerge.value;
             });
         });
     }
@@ -503,124 +490,35 @@
         const allCardIds = draftFlow.cards.map(c => c.id);
         const generateNextCardDropdown = (selectedId) => {
             let opts = `<option value="end_flow" ${selectedId === 'end_flow' ? 'selected' : ''}>🏁 End Flow</option>`;
-            allCardIds.forEach(id => {
-                opts += `<option value="${id}" ${selectedId === id ? 'selected' : ''}>Card: ${id}</option>`;
-            });
-            return opts;
+            allCardIds.forEach(id => { opts += `<option value="${id}" ${selectedId === id ? 'selected' : ''}>Card: ${id}</option>`; }); return opts;
         };
 
-        let html = `
-            <div style="background: #eef2ff; padding: 15px; border-radius: 6px; margin-bottom: 20px;">
-                <div class="form-group">
-                    <label>Flow Name</label>
-                    <input type="text" id="b_flowName" value="${draftFlow.name}">
-                </div>
-                <div class="form-group" style="margin-bottom: 0;">
-                    <label>Starting Card</label>
-                    <select id="b_startCardId">
-                        ${draftFlow.cards.length === 0 ? `<option value="end_flow">No cards available yet</option>` : generateNextCardDropdown(draftFlow.startCardId)}
-                    </select>
-                </div>
-            </div>
-            <h3 style="margin-bottom: 15px;">Flow Cards</h3>
-            <div id="b_cardsList">
-        `;
+        let html = `<div style="background: #eef2ff; padding: 15px; border-radius: 6px; margin-bottom: 20px;"><div class="form-group"><label>Flow Name</label><input type="text" id="b_flowName" value="${draftFlow.name}"></div><div class="form-group" style="margin-bottom: 0;"><label>Starting Card</label><select id="b_startCardId">${draftFlow.cards.length === 0 ? `<option value="end_flow">No cards available yet</option>` : generateNextCardDropdown(draftFlow.startCardId)}</select></div></div><h3 style="margin-bottom: 15px;">Flow Cards</h3><div id="b_cardsList">`;
 
         draftFlow.cards.forEach((card) => {
-            html += `
-            <div class="builder-card">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:1px solid #eee; padding-bottom:10px;">
-                    <h4 style="margin:0; color:var(--primary);">Card ID: ${card.id}</h4>
-                    <button class="danger small" onclick="b_removeCard('${card.id}')">🗑️ Delete</button>
-                </div>
-                <div class="form-group">
-                    <label>Internal Title</label>
-                    <input type="text" id="b_title_${card.id}" value="${card.title}">
-                </div>
-                <div class="form-group">
-                    <label>Question presented to user</label>
-                    <input type="text" id="b_question_${card.id}" value="${card.question}">
-                </div>
-                <div class="form-group">
-                    <label>Selection Type</label>
-                    <select id="b_selType_${card.id}">
-                        <option value="single" ${card.selectionType === 'single' ? 'selected' : ''}>Single Select (Radio Buttons)</option>
-                        <option value="multiple" ${card.selectionType === 'multiple' ? 'selected' : ''}>Multiple Select (Checkboxes)</option>
-                    </select>
-                </div>
-                
-                <label style="display:block; margin-bottom: 5px; font-weight: bold; font-size: 14px; margin-top: 20px;">Options & Routing</label>
-            `;
+            html += `<div class="builder-card"><div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:1px solid #eee; padding-bottom:10px;"><h4 style="margin:0; color:var(--primary);">Card ID: ${card.id}</h4><button class="danger small" onclick="b_removeCard('${card.id}')">🗑️ Delete</button></div><div class="form-group"><label>Internal Title</label><input type="text" id="b_title_${card.id}" value="${card.title}"></div><div class="form-group"><label>Question presented to user</label><input type="text" id="b_question_${card.id}" value="${card.question}"></div><div class="form-group"><label>Selection Type</label><select id="b_selType_${card.id}"><option value="single" ${card.selectionType === 'single' ? 'selected' : ''}>Single Select (Radio Buttons)</option><option value="multiple" ${card.selectionType === 'multiple' ? 'selected' : ''}>Multiple Select (Checkboxes)</option></select></div><label style="display:block; margin-bottom: 5px; font-weight: bold; font-size: 14px; margin-top: 20px;">Options & Routing</label>`;
             
             card.options.forEach((opt, oIndex) => {
-                html += `
-                    <div class="builder-option">
-                        <div class="builder-option-row">
-                            <input type="text" id="b_opt_label_${card.id}_${oIndex}" value="${opt.label}" placeholder="Option label" style="flex:1;">
-                            <span style="color: #888;">➔ routes to ➔</span>
-                            <select id="b_opt_next_${card.id}_${oIndex}" style="flex:1;">
-                                ${generateNextCardDropdown(opt.nextCardId)}
-                            </select>
-                            <button class="danger small" onclick="b_removeOption('${card.id}', ${oIndex})">X</button>
-                        </div>
-                        <div class="builder-option-row">
-                            <input type="text" id="b_opt_merge_${card.id}_${oIndex}" value="${opt.mergeText || ''}" placeholder="Optional: Custom message if this merges into an active sub-flow" style="font-size: 12px; background: #fff;">
-                        </div>
-                    </div>
-                `;
+                html += `<div class="builder-option"><div class="builder-option-row"><input type="text" id="b_opt_label_${card.id}_${oIndex}" value="${opt.label}" placeholder="Option label" style="flex:1;"><span style="color: #888;">➔ routes to ➔</span><select id="b_opt_next_${card.id}_${oIndex}" style="flex:1;">${generateNextCardDropdown(opt.nextCardId)}</select><button class="danger small" onclick="b_removeOption('${card.id}', ${oIndex})">X</button></div><div class="builder-option-row"><input type="text" id="b_opt_merge_${card.id}_${oIndex}" value="${opt.mergeText || ''}" placeholder="Optional: Custom message if this merges into an active sub-flow" style="font-size: 12px; background: #fff;"></div></div>`;
             });
             html += `<button class="secondary small" onclick="b_addOption('${card.id}')" style="margin-top: 10px;">+ Add Option</button></div>`;
         });
-
-        html += `</div><button onclick="b_addCard()" style="margin-top: 10px;">+ Create New Card</button>`;
-        container.innerHTML = html;
+        html += `</div><button onclick="b_addCard()" style="margin-top: 10px;">+ Create New Card</button>`; container.innerHTML = html;
     }
 
-    function b_addCard() {
-        syncDOMToDraft();
-        const newId = 'card_' + Math.floor(Math.random() * 10000);
-        // Default new cards to single select
-        draftFlow.cards.push({ id: newId, title: "", question: "", selectionType: "single", options: [] });
-        if (draftFlow.cards.length === 1) draftFlow.startCardId = newId;
-        renderBuilder();
-    }
-
-    function b_removeCard(cardId) {
-        if(!confirm("Are you sure?")) return;
-        syncDOMToDraft();
-        draftFlow.cards = draftFlow.cards.filter(c => c.id !== cardId);
-        if(draftFlow.startCardId === cardId) draftFlow.startCardId = draftFlow.cards.length > 0 ? draftFlow.cards[0].id : "end_flow";
-        draftFlow.cards.forEach(c => c.options.forEach(opt => { if(opt.nextCardId === cardId) opt.nextCardId = "end_flow"; }));
-        renderBuilder();
-    }
-
-    function b_addOption(cardId) {
-        syncDOMToDraft();
-        draftFlow.cards.find(c => c.id === cardId).options.push({ label: "", nextCardId: "end_flow", mergeText: "" });
-        renderBuilder();
-    }
-
-    function b_removeOption(cardId, optionIndex) {
-        syncDOMToDraft();
-        draftFlow.cards.find(c => c.id === cardId).options.splice(optionIndex, 1);
-        renderBuilder();
-    }
-
+    function b_addCard() { syncDOMToDraft(); const newId = 'card_' + Math.floor(Math.random() * 10000); draftFlow.cards.push({ id: newId, title: "", question: "", selectionType: "single", options: [] }); if (draftFlow.cards.length === 1) draftFlow.startCardId = newId; renderBuilder(); }
+    function b_removeCard(cardId) { if(!confirm("Are you sure?")) return; syncDOMToDraft(); draftFlow.cards = draftFlow.cards.filter(c => c.id !== cardId); if(draftFlow.startCardId === cardId) draftFlow.startCardId = draftFlow.cards.length > 0 ? draftFlow.cards[0].id : "end_flow"; draftFlow.cards.forEach(c => c.options.forEach(opt => { if(opt.nextCardId === cardId) opt.nextCardId = "end_flow"; })); renderBuilder(); }
+    function b_addOption(cardId) { syncDOMToDraft(); draftFlow.cards.find(c => c.id === cardId).options.push({ label: "", nextCardId: "end_flow", mergeText: "" }); renderBuilder(); }
+    function b_removeOption(cardId, optionIndex) { syncDOMToDraft(); draftFlow.cards.find(c => c.id === cardId).options.splice(optionIndex, 1); renderBuilder(); }
+    
     function saveBuilderFlow() {
-        syncDOMToDraft();
-        const flows = getFlows();
-        const existingIndex = flows.findIndex(f => f.id === draftFlow.id);
-        if (existingIndex >= 0) flows[existingIndex] = draftFlow;
-        else flows.push(draftFlow);
-        
-        saveFlows(flows);
-        alert("Flow template saved!");
-        navigateTo('dashboard');
+        syncDOMToDraft(); const flows = getFlows(); const existingIndex = flows.findIndex(f => f.id === draftFlow.id);
+        if (existingIndex >= 0) flows[existingIndex] = draftFlow; else flows.push(draftFlow);
+        saveFlows(flows); alert("Flow template saved!"); navigateTo('dashboard');
     }
 
     // Init App
     renderDashboard();
-
 </script>
 </body>
 </html>
