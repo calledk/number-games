@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Usercard Flow System - Dynamic Selection & Merge</title>
+    <title>Usercard Flow System - Visible Merges</title>
     <style>
         :root {
             --bg: #f4f4f9; --text: #333; --primary: #4361ee; 
@@ -39,9 +39,18 @@
             display: flex; justify-content: space-between; align-items: center;
             padding: 15px; background: white; border: 1px solid var(--border); border-radius: 6px;
         }
+        
+        /* Subflow Dashboard Items */
         .subflow-item {
-            background: #f8f9fa; padding: 10px; margin-top: 10px; border-radius: 4px; border-left: 3px solid var(--primary);
+            background: #f8f9fa; padding: 12px; margin-top: 10px; border-radius: 4px; 
             display: flex; justify-content: space-between; align-items: center;
+            border-left: 4px solid var(--primary);
+        }
+        .subflow-item.merged {
+            border-left-color: #adb5bd; background: #f1f3f5; opacity: 0.8;
+        }
+        .subflow-item.completed {
+            border-left-color: var(--success);
         }
         
         /* Form Inputs */
@@ -60,9 +69,7 @@
             display: flex; flex-direction: column; gap: 8px;
             margin-bottom: 15px; background: #f8f9fa; padding: 12px; border-radius: 4px; border: 1px dashed var(--border);
         }
-        .builder-option-row {
-            display: flex; gap: 10px; align-items: center;
-        }
+        .builder-option-row { display: flex; gap: 10px; align-items: center; }
         
         /* Runner Specific */
         .options { margin: 20px 0; display: flex; flex-direction: column; gap: 10px; }
@@ -103,7 +110,7 @@
                     <h3 style="margin-top:0;">Sub-flow Merge Notice</h3>
                     <p id="runnerMergeText"></p>
                 </div>
-                <button id="btnMergeNext" class="success" onclick="executeMerge()">Next ➔</button>
+                <button id="btnMergeNext" class="success" onclick="executeMerge()">Acknowledge & Close Branch ➔</button>
             </div>
 
             <div id="runnerNormalScreen">
@@ -138,14 +145,14 @@
 
 <script>
     // --- 1. DATA MANAGEMENT ---
-    const DB_VERSION = 'v3_dynamic_select'; 
+    const DB_VERSION = 'v4_visible_merges'; 
     if(!localStorage.getItem(DB_VERSION)) {
         localStorage.clear();
         localStorage.setItem(DB_VERSION, 'true');
     }
 
-    const DB_FLOWS = 'my_flows_v3';
-    const DB_PROCS = 'my_processes_v3';
+    const DB_FLOWS = 'my_flows_v4';
+    const DB_PROCS = 'my_processes_v4';
 
     const defaultFlows = [{
         "id": "flow_onboarding",
@@ -156,7 +163,7 @@
                 "id": "card_1",
                 "title": "Initial Issue",
                 "question": "What issues is the user experiencing? (Select all that apply)",
-                "selectionType": "multiple", // NEW: single or multiple
+                "selectionType": "multiple",
                 "options": [
                     { "label": "Hardware broken", "nextCardId": "card_hw", "mergeText": "The hardware department is already handling a parallel ticket for this." },
                     { "label": "Account locked", "nextCardId": "card_sw", "mergeText": "An account unlock ticket is already active." }
@@ -242,21 +249,39 @@
             procList.innerHTML = '<p style="color: #666;">No active processes.</p>';
         } else {
             procList.innerHTML = procs.map(p => {
-                const activeBranches = p.subFlows.filter(sf => sf.status === 'in_progress');
-                let branchesHtml = activeBranches.map(sf => `
-                    <div class="subflow-item">
-                        <span>🔀 Sub-flow: <strong>${sf.name}</strong></span>
-                        <button class="small" onclick="resumeProcess('${p.id}', '${sf.id}')">Play Sub-flow</button>
-                    </div>
-                `).join('');
-
-                if(activeBranches.length === 0) branchesHtml = `<span style="color:var(--success); font-weight:bold;">All Sub-flows Completed!</span>`;
+                const activeCount = p.subFlows.filter(sf => sf.status === 'in_progress').length;
+                
+                // Map ALL subflows (active, merged, completed)
+                let branchesHtml = p.subFlows.map(sf => {
+                    if (sf.status === 'in_progress') {
+                        return `
+                        <div class="subflow-item">
+                            <span>🔀 Branch: <strong>${sf.name}</strong></span>
+                            <button class="small" onclick="resumeProcess('${p.id}', '${sf.id}')">Play Path</button>
+                        </div>`;
+                    } else if (sf.status === 'merged') {
+                        // Find the name of the branch it merged into
+                        const targetBranch = p.subFlows.find(t => t.id === sf.mergeTargetId);
+                        const targetName = targetBranch ? targetBranch.name : 'another branch';
+                        return `
+                        <div class="subflow-item merged">
+                            <span>🔀 Branch: <strong>${sf.name}</strong></span>
+                            <span style="font-size: 12px; font-weight: bold; color: #6c757d;">🔗 Closed (Merged into ${targetName})</span>
+                        </div>`;
+                    } else if (sf.status === 'completed') {
+                        return `
+                        <div class="subflow-item completed">
+                            <span>🔀 Branch: <strong>${sf.name}</strong></span>
+                            <span style="font-size: 12px; font-weight: bold; color: var(--success);">✅ Reached End</span>
+                        </div>`;
+                    }
+                }).join('');
 
                 return `
                 <div class="card" style="margin-bottom:10px;">
                     <div style="display:flex; justify-content: space-between; border-bottom: 1px solid #ddd; padding-bottom: 10px;">
                         <strong>${p.processName}</strong>
-                        <small>Total active branches: ${activeBranches.length}</small>
+                        <small>Active paths: ${activeCount} / Total generated: ${p.subFlows.length}</small>
                     </div>
                     <div>${branchesHtml}</div>
                 </div>
@@ -436,14 +461,13 @@
 
         subFlow.status = 'merged';
         
-        // Switch user context
-        const targetId = subFlow.mergeTargetId;
+        // Return to dashboard automatically after acknowledging a merge 
+        // (rather than forcing them into the target flow immediately, which can be disorienting)
         const allProcs = getProcs();
         allProcs[allProcs.findIndex(p => p.id === currentProcId)] = proc;
         saveProcs(allProcs);
 
-        currentSubFlowId = targetId;
-        renderRunner();
+        navigateTo('dashboard');
     }
 
     // --- 5. VISUAL BUILDER LOGIC ---
