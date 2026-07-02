@@ -12,6 +12,7 @@
             --card-bg: #fff;
             --border: #ccc;
             --danger: #ef233c;
+            --success: #2a9d8f;
         }
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -43,6 +44,7 @@
         button:hover { background-color: #3f37c9; }
         button.secondary { background-color: #6c757d; }
         button.danger { background-color: var(--danger); }
+        button.success { background-color: var(--success); }
         button.small { padding: 5px 10px; font-size: 12px; }
         
         .view { display: none; }
@@ -66,6 +68,10 @@
             background: white;
             border: 1px solid var(--border);
             border-radius: 6px;
+        }
+        .action-group {
+            display: flex;
+            gap: 5px;
         }
         
         /* Form Inputs */
@@ -130,11 +136,13 @@
 <div class="container">
     <nav>
         <button onclick="navigateTo('dashboard')">Dashboard</button>
-        <button onclick="navigateTo('builder')">Visual Flow Builder</button>
-    </nav>
+        </nav>
 
     <div id="dashboard" class="view active">
-        <h2>Flow Templates</h2>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+            <h2 style="margin: 0;">Flow Templates</h2>
+            <button class="success" onclick="navigateTo('builder', 'new')">+ Create New Template</button>
+        </div>
         <div id="templatesList" class="flow-list"></div>
 
         <h2 style="margin-top: 40px;">Active Processes</h2>
@@ -216,14 +224,27 @@
     let draftFlow = null; // Holds the visual builder state
 
     // --- 2. ROUTING ---
-    function navigateTo(viewId) {
+    function navigateTo(viewId, param = null) {
         document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
         document.getElementById(viewId).classList.add('active');
 
         if (viewId === 'dashboard') renderDashboard();
         if (viewId === 'builder') {
-            // For this implementation, we will always edit the first flow in the array
-            draftFlow = JSON.parse(JSON.stringify(getFlows()[0])); 
+            if (param === 'new') {
+                // Initialize a brand new, empty flow
+                draftFlow = {
+                    id: 'flow_' + Date.now(),
+                    name: "New Flow Template",
+                    startCardId: "end_flow",
+                    cards: []
+                };
+            } else {
+                // Clone an existing flow for editing
+                const existing = getFlows().find(f => f.id === param);
+                if(existing) {
+                    draftFlow = JSON.parse(JSON.stringify(existing));
+                }
+            }
             renderBuilder();
         }
     }
@@ -236,7 +257,10 @@
         document.getElementById('templatesList').innerHTML = flows.map(f => `
             <div class="flow-item">
                 <strong>${f.name}</strong>
-                <button onclick="startNewProcess('${f.id}')">Start Process</button>
+                <div class="action-group">
+                    <button class="secondary" onclick="navigateTo('builder', '${f.id}')">Edit</button>
+                    <button onclick="startNewProcess('${f.id}')">Start Process</button>
+                </div>
             </div>
         `).join('');
 
@@ -261,11 +285,15 @@
         if (!processName) return;
 
         const flow = getFlows().find(f => f.id === flowId);
+        
+        // Edge case safety if flow is completely empty
+        const startCard = flow.cards.length > 0 ? flow.startCardId : "end_flow";
+
         const newProc = {
             id: 'proc_' + Date.now(),
             processName: processName,
             flowId: flowId,
-            currentCardId: flow.startCardId,
+            currentCardId: startCard,
             status: 'in_progress',
             history: []
         };
@@ -286,6 +314,14 @@
     function renderRunner() {
         const proc = getProcs().find(p => p.id === currentProcId);
         const flow = getFlows().find(f => f.id === proc.flowId);
+        
+        // Handle missing flow templates (if deleted while running)
+        if(!flow) {
+            alert("The flow template for this process no longer exists.");
+            navigateTo('dashboard');
+            return;
+        }
+
         const card = flow.cards.find(c => c.id === proc.currentCardId);
 
         document.getElementById('runnerProcessName').innerText = `Running Process: ${proc.processName}`;
@@ -396,7 +432,7 @@
                 <div class="form-group" style="margin-bottom: 0;">
                     <label>Starting Card</label>
                     <select id="b_startCardId">
-                        ${generateNextCardDropdown(draftFlow.startCardId)}
+                        ${draftFlow.cards.length === 0 ? `<option value="end_flow">No cards available yet</option>` : generateNextCardDropdown(draftFlow.startCardId)}
                     </select>
                 </div>
             </div>
@@ -460,6 +496,7 @@
         syncDOMToDraft();
         const newId = 'card_' + Math.floor(Math.random() * 10000);
         draftFlow.cards.push({ id: newId, title: "", question: "", options: [] });
+        
         // Automatically set it as start card if it's the first one
         if (draftFlow.cards.length === 1) draftFlow.startCardId = newId;
         renderBuilder();
@@ -469,8 +506,19 @@
         if(!confirm("Are you sure you want to delete this card?")) return;
         syncDOMToDraft();
         draftFlow.cards = draftFlow.cards.filter(c => c.id !== cardId);
+        
         // If we deleted the start card, reset it
-        if(draftFlow.startCardId === cardId) draftFlow.startCardId = draftFlow.cards.length ? draftFlow.cards[0].id : "end_flow";
+        if(draftFlow.startCardId === cardId) {
+            draftFlow.startCardId = draftFlow.cards.length > 0 ? draftFlow.cards[0].id : "end_flow";
+        }
+        
+        // Also cleanup any options pointing to the deleted card
+        draftFlow.cards.forEach(c => {
+            c.options.forEach(opt => {
+                if(opt.nextCardId === cardId) opt.nextCardId = "end_flow";
+            });
+        });
+
         renderBuilder();
     }
 
@@ -491,8 +539,16 @@
     function saveBuilderFlow() {
         syncDOMToDraft();
         const flows = getFlows();
-        // Since we are just editing the first flow for this demo:
-        flows[0] = draftFlow;
+        
+        // Check if we are updating an existing flow or adding a new one
+        const existingIndex = flows.findIndex(f => f.id === draftFlow.id);
+        
+        if (existingIndex >= 0) {
+            flows[existingIndex] = draftFlow;
+        } else {
+            flows.push(draftFlow);
+        }
+        
         saveFlows(flows);
         alert("Flow template saved successfully!");
         navigateTo('dashboard');
